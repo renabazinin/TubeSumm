@@ -21,7 +21,7 @@ import {
   DEFAULT_FOLDER_ID,
   type HistoryFolder
 } from './utils/storage';
-import { VideoSummary, SummarizeMode, GeminiModel, SummaryOptions } from './types';
+import { ExtraContextFile, VideoSummary, SummarizeMode, GeminiModel, SummaryOptions } from './types';
 
 type QueueStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -134,48 +134,45 @@ export default function App() {
   }, [queue, queueStats.running, apiKey]);
 
   const handleSummarizeManyUrls = (
-    bulkText: string,
+    items: Array<{ url: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
     model: GeminiModel,
     baseOptions: SummaryOptions,
     folderId: string
   ) => {
-    const lines = bulkText
-      .split(/\r?\n/)
-      .map(l => l.trim())
-      .filter(Boolean);
+    const cleaned = items
+      .map(i => ({
+        url: i.url.trim(),
+        contextText: (i.contextText ?? '').trim(),
+        extraContextFile: i.extraContextFile,
+      }))
+      .filter(i => !!i.url);
 
-    if (lines.length === 0) return;
+    if (cleaned.length === 0) return;
 
-    const items: QueueItem[] = lines.map((line) => {
-      // Format supported: "url | optional per-video context"
-      const [urlPart, ...ctxParts] = line.split('|');
-      const url = (urlPart ?? '').trim();
-      const perVideoContext = ctxParts.join('|').trim();
-
-      return {
-        id: crypto.randomUUID(),
-        value: url,
-        submitMode: 'url' as const,
-        model,
-        options: {
-          ...baseOptions,
-          // In bulk mode, context is per-summary (use the per-line context only).
-          extraContextText: perVideoContext || undefined,
-        },
-        folderId: folderId || DEFAULT_FOLDER_ID,
-        status: 'pending' as const,
-      } as QueueItem;
-    }).filter(i => !!i.value);
+    const queueItems: QueueItem[] = cleaned.map((i) => ({
+      id: crypto.randomUUID(),
+      value: i.url,
+      submitMode: 'url' as const,
+      model,
+      options: {
+        ...baseOptions,
+        // In bulk mode, context is per-summary (use per-item values only).
+        extraContextText: i.contextText || undefined,
+        extraContextFile: i.extraContextFile,
+      },
+      folderId: folderId || DEFAULT_FOLDER_ID,
+      status: 'pending' as const,
+    } as QueueItem));
 
     if (items.length === 0) return;
 
     setError(null);
     setIsUnlistedError(false);
-    setQueue(prev => [...prev, ...items]);
+    setQueue(prev => [...prev, ...queueItems]);
   };
 
   const handleSummarizeManyTranscripts = (
-    transcripts: Array<{ transcript: string; contextText?: string }>,
+    transcripts: Array<{ transcript: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
     model: GeminiModel,
     baseOptions: SummaryOptions,
     folderId: string
@@ -184,6 +181,7 @@ export default function App() {
       .map(t => ({
         transcript: t.transcript.trim(),
         contextText: (t.contextText ?? '').trim(),
+        extraContextFile: t.extraContextFile,
       }))
       .filter(t => !!t.transcript);
     if (cleaned.length === 0) return;
@@ -197,6 +195,7 @@ export default function App() {
         ...baseOptions,
         // In bulk mode, context is per-summary (use the per-transcript context only).
         extraContextText: t.contextText || undefined,
+        extraContextFile: t.extraContextFile,
       },
       folderId: folderId || DEFAULT_FOLDER_ID,
       status: 'pending' as const,

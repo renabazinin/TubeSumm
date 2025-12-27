@@ -5,8 +5,18 @@ import { DEFAULT_FOLDER_ID, type HistoryFolder } from '../utils/storage';
 
 interface InputSectionProps {
   onSummarize: (value: string, mode: SummarizeMode, model: GeminiModel, options: SummaryOptions) => void;
-  onSummarizeManyUrls: (bulkText: string, model: GeminiModel, options: SummaryOptions, folderId: string) => void;
-  onSummarizeManyTranscripts: (transcripts: Array<{ transcript: string; contextText?: string }>, model: GeminiModel, options: SummaryOptions, folderId: string) => void;
+  onSummarizeManyUrls: (
+    items: Array<{ url: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
+    model: GeminiModel,
+    options: SummaryOptions,
+    folderId: string
+  ) => void;
+  onSummarizeManyTranscripts: (
+    transcripts: Array<{ transcript: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
+    model: GeminiModel,
+    options: SummaryOptions,
+    folderId: string
+  ) => void;
   isLoading: boolean;
   mode: SummarizeMode;
   setMode: (mode: SummarizeMode) => void;
@@ -19,11 +29,13 @@ interface InputSectionProps {
 export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSummarizeManyUrls, onSummarizeManyTranscripts, isLoading, mode, setMode, queueStats, folders, queueTargetFolderId, setQueueTargetFolderId }) => {
   const [model, setModel] = useState<GeminiModel>('gemini-3-flash-preview');
   const [url, setUrl] = useState('');
-  const [bulkUrls, setBulkUrls] = useState('');
   const [isMultiUrl, setIsMultiUrl] = useState(false);
+  const [multiUrls, setMultiUrls] = useState<Array<{ url: string; contextText: string; extraContextFile?: ExtraContextFile; fileInputNonce: number }>>([
+    { url: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }
+  ]);
   const [transcript, setTranscript] = useState('');
-  const [multiTranscripts, setMultiTranscripts] = useState<Array<{ transcript: string; contextText: string }>>([
-    { transcript: '', contextText: '' }
+  const [multiTranscripts, setMultiTranscripts] = useState<Array<{ transcript: string; contextText: string; extraContextFile?: ExtraContextFile; fileInputNonce: number }>>([
+    { transcript: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }
   ]);
   const [isMultiTranscript, setIsMultiTranscript] = useState(false);
   
@@ -34,6 +46,26 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
   const [showOptions, setShowOptions] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const readAsExtraContextFile = async (file: File): Promise<ExtraContextFile> => {
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error('File too large (Max 10MB)');
+    }
+
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+
+    const base64Data = dataUrl.split(',')[1];
+    return {
+      data: base64Data,
+      mimeType: file.type,
+      name: file.name,
+    };
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const options: SummaryOptions = {
@@ -43,14 +75,25 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
     };
 
     if (mode === 'url' && isMultiUrl) {
-      if (!bulkUrls.trim()) return;
-      onSummarizeManyUrls(bulkUrls, model, options, queueTargetFolderId || DEFAULT_FOLDER_ID);
+      const cleaned = multiUrls
+        .map(i => ({
+          url: i.url.trim(),
+          contextText: i.contextText.trim(),
+          extraContextFile: i.extraContextFile,
+        }))
+        .filter(i => !!i.url);
+      if (cleaned.length === 0) return;
+      onSummarizeManyUrls(cleaned, model, options, queueTargetFolderId || DEFAULT_FOLDER_ID);
       return;
     }
 
     if (mode === 'transcript' && isMultiTranscript) {
       const cleaned = multiTranscripts
-        .map(t => ({ transcript: t.transcript.trim(), contextText: t.contextText.trim() }))
+        .map(t => ({
+          transcript: t.transcript.trim(),
+          contextText: t.contextText.trim(),
+          extraContextFile: t.extraContextFile,
+        }))
         .filter(t => !!t.transcript);
       if (cleaned.length === 0) return;
       onSummarizeManyTranscripts(cleaned, model, options, queueTargetFolderId || DEFAULT_FOLDER_ID);
@@ -92,11 +135,12 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
 
   const canSubmit = !isLoading && (
     mode === 'url'
-      ? (isMultiUrl ? !!bulkUrls.trim() : !!url.trim())
+      ? (isMultiUrl ? multiUrls.some(u => !!u.url.trim()) : !!url.trim())
       : (isMultiTranscript ? multiTranscripts.some(t => !!t.transcript.trim()) : !!transcript.trim())
   );
 
-  const showQueueFolderSelect = (mode === 'url' && isMultiUrl) || (mode === 'transcript' && isMultiTranscript);
+  const isQueueMode = (mode === 'url' && isMultiUrl) || (mode === 'transcript' && isMultiTranscript);
+  const showQueueFolderSelect = isQueueMode;
 
   return (
     <div className="w-full max-w-3xl mx-auto bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden mb-8">
@@ -156,21 +200,118 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                   <Youtube className="absolute left-3 top-3.5 w-5 h-5 text-slate-500" />
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <textarea
-                    placeholder={
-                      "One URL per line. Optional per-video context after |\n\n" +
-                      "https://youtube.com/watch?v=AAA | focus on pricing\n" +
-                      "https://youtube.com/watch?v=BBB | summarize key takeaways"
-                    }
-                    value={bulkUrls}
-                    onChange={(e) => setBulkUrls(e.target.value)}
-                    rows={6}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all resize-none font-mono text-sm"
-                    disabled={isLoading}
-                  />
-                  <div className="text-xs text-slate-500">
-                    Runs up to <span className="text-slate-300">2</span> Gemini requests at once.
+                <div className="space-y-3">
+                  {multiUrls.map((item, idx) => {
+                    const inputId = `multi-url-file-${idx}-${item.fileInputNonce}`;
+                    return (
+                      <div key={idx} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-slate-500">Video {idx + 1}</div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (multiUrls.length <= 1) {
+                                setMultiUrls([{ url: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }]);
+                                return;
+                              }
+                              setMultiUrls(prev => prev.filter((_, i) => i !== idx));
+                            }}
+                            className="text-slate-500 hover:text-white"
+                            disabled={isLoading}
+                            aria-label="Remove video"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="https://www.youtube.com/watch?v=..."
+                            value={item.url}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setMultiUrls(prev => prev.map((p, i) => i === idx ? { ...p, url: next } : p));
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 pl-11 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                            disabled={isLoading}
+                          />
+                          <Youtube className="absolute left-3 top-3.5 w-5 h-5 text-slate-500" />
+                        </div>
+
+                        <textarea
+                          placeholder="Context for this summary (optional)"
+                          value={item.contextText}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            setMultiUrls(prev => prev.map((p, i) => i === idx ? { ...p, contextText: next } : p));
+                          }}
+                          rows={2}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all resize-none text-sm"
+                          disabled={isLoading}
+                        />
+
+                        <div className="space-y-1">
+                          <div className="text-xs text-slate-400 font-medium ml-1">Attach PDF/Text Context (Optional)</div>
+                          <input
+                            id={inputId}
+                            type="file"
+                            accept=".pdf,.txt"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              try {
+                                const parsed = await readAsExtraContextFile(file);
+                                setMultiUrls(prev => prev.map((p, i) => i === idx ? { ...p, extraContextFile: parsed } : p));
+                              } catch (err: any) {
+                                alert(err?.message || 'Failed to read file');
+                              }
+                            }}
+                            className="hidden"
+                            disabled={isLoading}
+                          />
+                          <div className="flex items-center gap-3">
+                            <label
+                              htmlFor={inputId}
+                              className={`flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors ${isLoading ? 'opacity-60 pointer-events-none' : ''}`}
+                            >
+                              <FileUp size={16} />
+                              Choose File
+                            </label>
+                            {item.extraContextFile && (
+                              <div className="flex items-center gap-2 bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-lg text-sm border border-indigo-500/30">
+                                <span className="truncate max-w-[150px]">{item.extraContextFile.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMultiUrls(prev => prev.map((p, i) => i === idx ? { ...p, extraContextFile: undefined, fileInputNonce: p.fileInputNonce + 1 } : p));
+                                  }}
+                                  className="hover:text-white"
+                                  disabled={isLoading}
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setMultiUrls(prev => [...prev, { url: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }])}
+                      className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
+                      disabled={isLoading}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add video
+                    </button>
+                    <div className="text-xs text-slate-500">
+                      Runs up to <span className="text-slate-300">2</span> Gemini requests at once.
+                    </div>
                   </div>
                 </div>
               )}
@@ -205,7 +346,9 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {multiTranscripts.map((t, idx) => (
+                  {multiTranscripts.map((t, idx) => {
+                    const inputId = `multi-transcript-file-${idx}-${t.fileInputNonce}`;
+                    return (
                     <div key={idx} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-slate-500">Transcript {idx + 1}</div>
@@ -213,7 +356,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                           type="button"
                           onClick={() => {
                             if (multiTranscripts.length <= 1) {
-                              setMultiTranscripts([{ transcript: '', contextText: '' }]);
+                              setMultiTranscripts([{ transcript: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }]);
                               return;
                             }
                             setMultiTranscripts(prev => prev.filter((_, i) => i !== idx));
@@ -248,13 +391,59 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500 transition-all resize-none text-sm"
                         disabled={isLoading}
                       />
+
+                      <div className="space-y-1">
+                        <div className="text-xs text-slate-400 font-medium ml-1">Attach PDF/Text Context (Optional)</div>
+                        <input
+                          id={inputId}
+                          type="file"
+                          accept=".pdf,.txt"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            try {
+                              const parsed = await readAsExtraContextFile(file);
+                              setMultiTranscripts(prev => prev.map((p, i) => i === idx ? { ...p, extraContextFile: parsed } : p));
+                            } catch (err: any) {
+                              alert(err?.message || 'Failed to read file');
+                            }
+                          }}
+                          className="hidden"
+                          disabled={isLoading}
+                        />
+                        <div className="flex items-center gap-3">
+                          <label
+                            htmlFor={inputId}
+                            className={`flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors ${isLoading ? 'opacity-60 pointer-events-none' : ''}`}
+                          >
+                            <FileUp size={16} />
+                            Choose File
+                          </label>
+                          {t.extraContextFile && (
+                            <div className="flex items-center gap-2 bg-yellow-500/20 text-yellow-300 px-3 py-1.5 rounded-lg text-sm border border-yellow-500/30">
+                              <span className="truncate max-w-[150px]">{t.extraContextFile.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMultiTranscripts(prev => prev.map((p, i) => i === idx ? { ...p, extraContextFile: undefined, fileInputNonce: p.fileInputNonce + 1 } : p));
+                                }}
+                                className="hover:text-white"
+                                disabled={isLoading}
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  ))}
+                  );
+                  })}
 
                   <div className="flex items-center justify-between gap-3">
                     <button
                       type="button"
-                      onClick={() => setMultiTranscripts(prev => [...prev, { transcript: '', contextText: '' }])}
+                      onClick={() => setMultiTranscripts(prev => [...prev, { transcript: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }])}
                       className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
                       disabled={isLoading}
                     >
@@ -288,35 +477,37 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
           )}
 
           {/* Attach PDF/Text Context (Front) */}
-          <div className="space-y-1">
-            <label className="text-xs text-slate-400 font-medium ml-1">Attach PDF/Text Context (Optional)</label>
-            <div className="flex items-center gap-3">
-              <input 
-                type="file" 
-                ref={fileInputRef}
-                accept=".pdf,.txt"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
-                disabled={isLoading}
-              >
-                <FileUp size={16} />
-                Choose File
-              </button>
-              {extraContextFile && (
-                <div className="flex items-center gap-2 bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-lg text-sm border border-indigo-500/30">
-                  <span className="truncate max-w-[150px]">{extraContextFile.name}</span>
-                  <button type="button" onClick={clearFile} className="hover:text-white" disabled={isLoading}>
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
+          {!isQueueMode && (
+            <div className="space-y-1">
+              <label className="text-xs text-slate-400 font-medium ml-1">Attach PDF/Text Context (Optional)</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".pdf,.txt"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
+                  disabled={isLoading}
+                >
+                  <FileUp size={16} />
+                  Choose File
+                </button>
+                {extraContextFile && (
+                  <div className="flex items-center gap-2 bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-lg text-sm border border-indigo-500/30">
+                    <span className="truncate max-w-[150px]">{extraContextFile.name}</span>
+                    <button type="button" onClick={clearFile} className="hover:text-white" disabled={isLoading}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Toggle Options */}
           <div>
@@ -373,7 +564,13 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                         placeholder="Add specific instructions or background info..."
                         rows={2}
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 resize-none placeholder-slate-600"
+                        disabled={isQueueMode}
                     />
+                    {isQueueMode && (
+                      <div className="text-xs text-slate-500">
+                        In queue mode, add context per item above.
+                      </div>
+                    )}
                 </div>
             </div>
           )}
