@@ -1,0 +1,5 @@
+{
+  "name": "TubeSumm AI",
+  "description": "Intelligent YouTube video summarizer using Gemini 3.0 Flash. Supports video URLs directly.",
+  "requestFramePermissions": []
+}
