@@ -255,7 +255,6 @@ export default function App() {
 
   const handleSelectHistory = (summary: VideoSummary) => {
     setCurrentSummary(summary);
-    setIsSidebarOpen(false);
     setError(null);
     setIsUnlistedError(false);
   };
@@ -302,9 +301,9 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              onClick={() => setIsSidebarOpen(true)}
               className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-              aria-label="Toggle history"
+              aria-label="Open history"
             >
               <History size={20} />
             </button>
