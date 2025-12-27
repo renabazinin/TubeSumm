@@ -122,6 +122,37 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, isLoadi
             </div>
           )}
 
+          {/* Attach PDF/Text Context (Front) */}
+          <div className="space-y-1">
+            <label className="text-xs text-slate-400 font-medium ml-1">Attach PDF/Text Context (Optional)</label>
+            <div className="flex items-center gap-3">
+              <input 
+                type="file" 
+                ref={fileInputRef}
+                accept=".pdf,.txt"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
+                disabled={isLoading}
+              >
+                <FileUp size={16} />
+                Choose File
+              </button>
+              {extraContextFile && (
+                <div className="flex items-center gap-2 bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-lg text-sm border border-indigo-500/30">
+                  <span className="truncate max-w-[150px]">{extraContextFile.name}</span>
+                  <button type="button" onClick={clearFile} className="hover:text-white" disabled={isLoading}>
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Toggle Options */}
           <div>
             <button 
@@ -178,36 +209,6 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, isLoadi
                         rows={2}
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 resize-none placeholder-slate-600"
                     />
-                </div>
-
-                {/* Row 3: File Upload */}
-                <div className="space-y-1">
-                     <label className="text-xs text-slate-400 font-medium ml-1">Attach PDF/Text Context</label>
-                     <div className="flex items-center gap-3">
-                        <input 
-                            type="file" 
-                            ref={fileInputRef}
-                            accept=".pdf,.txt"
-                            onChange={handleFileChange}
-                            className="hidden"
-                        />
-                        <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
-                        >
-                            <FileUp size={16} />
-                            Choose File
-                        </button>
-                        {extraContextFile && (
-                            <div className="flex items-center gap-2 bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-lg text-sm border border-indigo-500/30">
-                                <span className="truncate max-w-[150px]">{extraContextFile.name}</span>
-                                <button type="button" onClick={clearFile} className="hover:text-white">
-                                    <X size={14} />
-                                </button>
-                            </div>
-                        )}
-                     </div>
                 </div>
             </div>
           )}
