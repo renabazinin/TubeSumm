@@ -1,18 +1,29 @@
 import React, { useState, useRef } from 'react';
-import { Youtube, FileText, Loader2, Play, Cpu, Info, Settings2, FileUp, X } from 'lucide-react';
+import { Youtube, FileText, Loader2, Play, Cpu, Info, Settings2, FileUp, X, Plus } from 'lucide-react';
 import { SummarizeMode, GeminiModel, OutputLanguage, ExtraContextFile, SummaryOptions } from '../types';
+import { DEFAULT_FOLDER_ID, type HistoryFolder } from '../utils/storage';
 
 interface InputSectionProps {
   onSummarize: (value: string, mode: SummarizeMode, model: GeminiModel, options: SummaryOptions) => void;
+  onSummarizeManyUrls: (bulkText: string, model: GeminiModel, options: SummaryOptions, folderId: string) => void;
+  onSummarizeManyTranscripts: (transcripts: string[], model: GeminiModel, options: SummaryOptions, folderId: string) => void;
   isLoading: boolean;
   mode: SummarizeMode;
   setMode: (mode: SummarizeMode) => void;
+  queueStats?: { pending: number; running: number };
+  folders: HistoryFolder[];
+  queueTargetFolderId: string;
+  setQueueTargetFolderId: (folderId: string) => void;
 }
 
-export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, isLoading, mode, setMode }) => {
+export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSummarizeManyUrls, onSummarizeManyTranscripts, isLoading, mode, setMode, queueStats, folders, queueTargetFolderId, setQueueTargetFolderId }) => {
   const [model, setModel] = useState<GeminiModel>('gemini-3-flash-preview');
   const [url, setUrl] = useState('');
+  const [bulkUrls, setBulkUrls] = useState('');
+  const [isMultiUrl, setIsMultiUrl] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [multiTranscripts, setMultiTranscripts] = useState<string[]>(['']);
+  const [isMultiTranscript, setIsMultiTranscript] = useState(false);
   
   // Advanced Options
   const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>('auto');
@@ -23,14 +34,28 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, isLoadi
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const value = mode === 'url' ? url : transcript;
-    if (!value.trim()) return;
-    
-    onSummarize(value, mode, model, {
+    const options: SummaryOptions = {
       outputLanguage,
       extraContextText: extraContextText.trim() || undefined,
       extraContextFile
-    });
+    };
+
+    if (mode === 'url' && isMultiUrl) {
+      if (!bulkUrls.trim()) return;
+      onSummarizeManyUrls(bulkUrls, model, options, queueTargetFolderId || DEFAULT_FOLDER_ID);
+      return;
+    }
+
+    if (mode === 'transcript' && isMultiTranscript) {
+      const cleaned = multiTranscripts.map(t => t.trim()).filter(Boolean);
+      if (cleaned.length === 0) return;
+      onSummarizeManyTranscripts(cleaned, model, options, queueTargetFolderId || DEFAULT_FOLDER_ID);
+      return;
+    }
+
+    const value = mode === 'url' ? url : transcript;
+    if (!value.trim()) return;
+    onSummarize(value, mode, model, options);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,6 +85,14 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, isLoadi
     setExtraContextFile(undefined);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
+  const canSubmit = !isLoading && (
+    mode === 'url'
+      ? (isMultiUrl ? !!bulkUrls.trim() : !!url.trim())
+      : (isMultiTranscript ? multiTranscripts.some(t => !!t.trim()) : !!transcript.trim())
+  );
+
+  const showQueueFolderSelect = (mode === 'url' && isMultiUrl) || (mode === 'transcript' && isMultiTranscript);
 
   return (
     <div className="w-full max-w-3xl mx-auto bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden mb-8">
@@ -94,31 +127,147 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, isLoadi
         <div className="mb-6 space-y-4">
           {/* Main Input */}
           {mode === 'url' ? (
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="https://www.youtube.com/watch?v=..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 pl-11 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
-                disabled={isLoading}
-              />
-              <Youtube className="absolute left-3 top-3.5 w-5 h-5 text-slate-500" />
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-sm text-slate-400 select-none">
+                <input
+                  type="checkbox"
+                  checked={isMultiUrl}
+                  onChange={(e) => setIsMultiUrl(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50"
+                  disabled={isLoading}
+                />
+                Add multiple videos (queue)
+              </label>
+
+              {!isMultiUrl ? (
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 pl-11 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                    disabled={isLoading}
+                  />
+                  <Youtube className="absolute left-3 top-3.5 w-5 h-5 text-slate-500" />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <textarea
+                    placeholder={
+                      "One URL per line. Optional per-video context after |\n\n" +
+                      "https://youtube.com/watch?v=AAA | focus on pricing\n" +
+                      "https://youtube.com/watch?v=BBB | summarize key takeaways"
+                    }
+                    value={bulkUrls}
+                    onChange={(e) => setBulkUrls(e.target.value)}
+                    rows={6}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all resize-none font-mono text-sm"
+                    disabled={isLoading}
+                  />
+                  <div className="text-xs text-slate-500">
+                    Runs up to <span className="text-slate-300">2</span> Gemini requests at once.
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="relative">
-              <textarea
-                placeholder="Paste the video transcript here..."
-                value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
-                rows={6}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500 transition-all resize-none font-mono text-sm"
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-sm text-slate-400 select-none">
+                <input
+                  type="checkbox"
+                  checked={isMultiTranscript}
+                  onChange={(e) => setIsMultiTranscript(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-yellow-600 focus:ring-yellow-500/50"
+                  disabled={isLoading}
+                />
+                Add multiple transcripts (queue)
+              </label>
+
+              {!isMultiTranscript ? (
+                <div className="relative">
+                  <textarea
+                    placeholder="Paste the video transcript here..."
+                    value={transcript}
+                    onChange={(e) => setTranscript(e.target.value)}
+                    rows={6}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500 transition-all resize-none font-mono text-sm"
+                    disabled={isLoading}
+                  />
+                  <div className="mt-2 text-xs text-slate-500 flex items-center gap-1">
+                     <Info size={12} />
+                     <span>Tip: Open video description → Show transcript</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {multiTranscripts.map((t, idx) => (
+                    <div key={idx} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-slate-500">Transcript {idx + 1}</div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (multiTranscripts.length <= 1) {
+                              setMultiTranscripts(['']);
+                              return;
+                            }
+                            setMultiTranscripts(prev => prev.filter((_, i) => i !== idx));
+                          }}
+                          className="text-slate-500 hover:text-white"
+                          disabled={isLoading}
+                          aria-label="Remove transcript"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <textarea
+                        placeholder="Paste the transcript here..."
+                        value={t}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setMultiTranscripts(prev => prev.map((p, i) => i === idx ? next : p));
+                        }}
+                        rows={6}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500 transition-all resize-none font-mono text-sm"
+                        disabled={isLoading}
+                      />
+                    </div>
+                  ))}
+
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setMultiTranscripts(prev => [...prev, ''])}
+                      className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
+                      disabled={isLoading}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add transcript
+                    </button>
+                    <div className="text-xs text-slate-500">
+                      Runs up to <span className="text-slate-300">2</span> Gemini requests at once.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Queue Folder Target */}
+          {showQueueFolderSelect && (
+            <div className="space-y-1">
+              <label className="text-xs text-slate-400 font-medium ml-1">Save queued summaries to folder</label>
+              <select
+                value={queueTargetFolderId || DEFAULT_FOLDER_ID}
+                onChange={(e) => setQueueTargetFolderId(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                 disabled={isLoading}
-              />
-              <div className="mt-2 text-xs text-slate-500 flex items-center gap-1">
-                 <Info size={12} />
-                 <span>Tip: Open video description → Show transcript</span>
-              </div>
+              >
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
             </div>
           )}
 
@@ -217,9 +366,9 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, isLoadi
 
         <button
           type="submit"
-          disabled={isLoading || (mode === 'url' ? !url : !transcript)}
+          disabled={!canSubmit}
           className={`w-full flex items-center justify-center py-3 rounded-xl text-white font-medium transition-all ${
-            isLoading || (mode === 'url' ? !url : !transcript)
+            !canSubmit
               ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
               : mode === 'url'
                 ? 'bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-500/20'
@@ -234,10 +383,18 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, isLoadi
           ) : (
             <>
               <Play className="w-5 h-5 mr-2 fill-current" />
-              Generate Detailed Summary
+              {(mode === 'url' && isMultiUrl) || (mode === 'transcript' && isMultiTranscript)
+                ? 'Queue Summaries'
+                : 'Generate Detailed Summary'}
             </>
           )}
         </button>
+
+        {!!queueStats && (queueStats.pending > 0 || queueStats.running > 0) && (
+          <div className="mt-3 text-xs text-slate-500 text-center">
+            Queue: <span className="text-slate-300">{queueStats.running}</span> running • <span className="text-slate-300">{queueStats.pending}</span> pending
+          </div>
+        )}
       </form>
     </div>
   );

@@ -1,11 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { History, Plus } from 'lucide-react';
 import { HistorySidebar } from './components/HistorySidebar';
 import { InputSection } from './components/InputSection';
 import { SummaryDisplay } from './components/SummaryDisplay';
 import { generateSummaryFromUrl, generateSummaryFromTranscript } from './services/geminiService';
-import { saveSummary, getSummaries, deleteSummary, getApiKey, getRememberApiKey, setApiKey, setRememberApiKey } from './utils/storage';
+import {
+  createFolder,
+  deleteFolder,
+  getApiKey,
+  getFolders,
+  getRememberApiKey,
+  getSummaries,
+  getSummariesForFolder,
+  moveSummaryToFolder,
+  reorderSummaryInFolder,
+  saveSummary,
+  setApiKey,
+  setRememberApiKey,
+  deleteSummary,
+  DEFAULT_FOLDER_ID,
+  type HistoryFolder
+} from './utils/storage';
 import { VideoSummary, SummarizeMode, GeminiModel, SummaryOptions } from './types';
+
+type QueueStatus = 'pending' | 'running' | 'done' | 'error';
+
+type QueueItem = {
+  id: string;
+  value: string;
+  submitMode: SummarizeMode;
+  model: GeminiModel;
+  options: SummaryOptions;
+  folderId: string;
+  status: QueueStatus;
+  errorMessage?: string;
+};
 
 export default function App() {
   const [history, setHistory] = useState<VideoSummary[]>([]);
@@ -17,15 +46,157 @@ export default function App() {
   const [mode, setMode] = useState<SummarizeMode>('url');
   const [apiKey, setApiKeyState] = useState('');
   const [rememberApiKey, setRememberApiKeyState] = useState(false);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [folders, setFolders] = useState<HistoryFolder[]>([]);
+  const [activeFolderId, setActiveFolderId] = useState(DEFAULT_FOLDER_ID);
+  const [queueTargetFolderId, setQueueTargetFolderId] = useState(DEFAULT_FOLDER_ID);
 
   useEffect(() => {
     setHistory(getSummaries());
+    setFolders(getFolders());
     const remembered = getRememberApiKey();
     setRememberApiKeyState(remembered);
     if (remembered) {
       setApiKeyState(getApiKey());
     }
+
+    // Preserve previous behavior: sidebar visible by default on desktop.
+    if (window.innerWidth >= 1024) {
+      setIsSidebarOpen(true);
+    }
   }, []);
+
+  useEffect(() => {
+    // When switching folders and nothing is queued, keep the queue target aligned
+    // so bulk summaries land where the user is currently working.
+    if (queueStats.pending === 0 && queueStats.running === 0) {
+      setQueueTargetFolderId(activeFolderId);
+    }
+  }, [activeFolderId, queueStats.pending, queueStats.running]);
+
+  const refreshHistory = () => {
+    setHistory(getSummaries());
+    setFolders(getFolders());
+  };
+
+  const queueStats = {
+    pending: queue.filter(q => q.status === 'pending').length,
+    running: queue.filter(q => q.status === 'running').length,
+    done: queue.filter(q => q.status === 'done').length,
+    error: queue.filter(q => q.status === 'error').length,
+  };
+
+  useEffect(() => {
+    const runningCount = queueStats.running;
+    const available = 2 - runningCount;
+    if (available <= 0) return;
+
+    const next = queue.filter(q => q.status === 'pending').slice(0, available);
+    if (next.length === 0) return;
+
+    next.forEach((item) => {
+      setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'running', errorMessage: undefined } : q));
+
+      (async () => {
+        try {
+          let result;
+          if (item.submitMode === 'url') {
+            result = await generateSummaryFromUrl(item.value, item.model, item.options, apiKey);
+          } else {
+            result = await generateSummaryFromTranscript(item.value, item.model, item.options, apiKey);
+          }
+
+          const newSummary: VideoSummary = {
+            id: crypto.randomUUID(),
+            createdAt: Date.now(),
+            sourceType: item.submitMode,
+            sourceValue: item.submitMode === 'url' ? item.value : item.value.substring(0, 100) + '...',
+            model: item.model,
+            outputLanguage: item.options.outputLanguage,
+            hasExtraContext: !!(item.options.extraContextText || item.options.extraContextFile),
+            folderId: item.folderId || DEFAULT_FOLDER_ID,
+            ...result
+          };
+
+          saveSummary(newSummary);
+          setHistory(getSummaries());
+
+          setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'done' } : q));
+        } catch (err: any) {
+          console.error(err);
+          const message = err?.message === 'UNLISTED_VIDEO_ERROR'
+            ? 'Video is unlisted/restricted (use Transcript mode)'
+            : 'Failed to generate summary';
+          setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'error', errorMessage: message } : q));
+        }
+      })();
+    });
+  }, [queue, queueStats.running, apiKey]);
+
+  const handleSummarizeManyUrls = (
+    bulkText: string,
+    model: GeminiModel,
+    baseOptions: SummaryOptions,
+    folderId: string
+  ) => {
+    const lines = bulkText
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    if (lines.length === 0) return;
+
+    const items: QueueItem[] = lines.map((line) => {
+      // Format supported: "url | optional per-video context"
+      const [urlPart, ...ctxParts] = line.split('|');
+      const url = (urlPart ?? '').trim();
+      const perVideoContext = ctxParts.join('|').trim();
+      const combinedContext = [baseOptions.extraContextText, perVideoContext].filter(Boolean).join('\n');
+
+      return {
+        id: crypto.randomUUID(),
+        value: url,
+        submitMode: 'url',
+        model,
+        options: {
+          ...baseOptions,
+          extraContextText: combinedContext || undefined,
+        },
+        folderId: folderId || DEFAULT_FOLDER_ID,
+        status: 'pending',
+      };
+    }).filter(i => !!i.value);
+
+    if (items.length === 0) return;
+
+    setError(null);
+    setIsUnlistedError(false);
+    setQueue(prev => [...prev, ...items]);
+  };
+
+  const handleSummarizeManyTranscripts = (
+    transcripts: string[],
+    model: GeminiModel,
+    baseOptions: SummaryOptions,
+    folderId: string
+  ) => {
+    const cleaned = transcripts.map(t => t.trim()).filter(Boolean);
+    if (cleaned.length === 0) return;
+
+    const items: QueueItem[] = cleaned.map((transcriptChunk) => ({
+      id: crypto.randomUUID(),
+      value: transcriptChunk,
+      submitMode: 'transcript',
+      model,
+      options: baseOptions,
+      folderId: folderId || DEFAULT_FOLDER_ID,
+      status: 'pending',
+    }));
+
+    setError(null);
+    setIsUnlistedError(false);
+    setQueue(prev => [...prev, ...items]);
+  };
 
   const handleSummarize = async (
     value: string, 
@@ -89,12 +260,46 @@ export default function App() {
     }
   };
 
+  const handleCreateFolder = (name: string) => {
+    const created = createFolder(name);
+    if (!created) return;
+    refreshHistory();
+    setActiveFolderId(created.id);
+  };
+
+  const handleDeleteFolder = (folderId: string) => {
+    deleteFolder(folderId);
+    refreshHistory();
+    if (activeFolderId === folderId) {
+      setActiveFolderId(DEFAULT_FOLDER_ID);
+    }
+  };
+
+  const handleMoveSummaryToFolder = (summaryId: string, folderId: string) => {
+    moveSummaryToFolder(summaryId, folderId);
+    refreshHistory();
+  };
+
+  const handleReorderSummary = (folderId: string, summaryId: string, direction: 'up' | 'down') => {
+    reorderSummaryInFolder(folderId, summaryId, direction);
+    // Pull the sorted view back into state (so UI updates immediately)
+    const all = getSummaries();
+    setHistory(all);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
       {/* Navigation */}
       <nav className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+              aria-label="Toggle history"
+            >
+              <History size={20} />
+            </button>
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
                 <span className="text-white font-bold text-lg">T</span>
@@ -199,7 +404,15 @@ export default function App() {
       {/* Main Content */}
       <div className="flex-1 relative flex">
         <HistorySidebar 
-          summaries={history}
+          summaries={getSummariesForFolder(activeFolderId)}
+          allSummaries={history}
+          folders={folders}
+          activeFolderId={activeFolderId}
+          onSelectFolder={setActiveFolderId}
+          onCreateFolder={handleCreateFolder}
+          onDeleteFolder={handleDeleteFolder}
+          onMoveSummaryToFolder={handleMoveSummaryToFolder}
+          onReorderSummary={handleReorderSummary}
           isOpen={isSidebarOpen}
           toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           onSelect={handleSelectHistory}
@@ -223,9 +436,15 @@ export default function App() {
 
               <InputSection 
                 onSummarize={handleSummarize} 
+                onSummarizeManyUrls={handleSummarizeManyUrls}
+                onSummarizeManyTranscripts={handleSummarizeManyTranscripts}
                 isLoading={isLoading} 
                 mode={mode}
                 setMode={setMode}
+                queueStats={{ pending: queueStats.pending, running: queueStats.running }}
+                folders={folders}
+                queueTargetFolderId={queueTargetFolderId}
+                setQueueTargetFolderId={setQueueTargetFolderId}
               />
               
               {isUnlistedError && (

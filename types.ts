@@ -18,6 +18,7 @@ export interface VideoSummary {
   // New fields
   outputLanguage?: string;
   hasExtraContext?: boolean;
+  folderId?: string; // defaults to 'general'
 }
 
 export interface StoredSummary extends VideoSummary {}
