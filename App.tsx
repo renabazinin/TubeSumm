@@ -66,6 +66,13 @@ export default function App() {
     }
   }, []);
 
+  const queueStats = {
+    pending: queue.filter(q => q.status === 'pending').length,
+    running: queue.filter(q => q.status === 'running').length,
+    done: queue.filter(q => q.status === 'done').length,
+    error: queue.filter(q => q.status === 'error').length,
+  };
+
   useEffect(() => {
     // When switching folders and nothing is queued, keep the queue target aligned
     // so bulk summaries land where the user is currently working.
@@ -77,13 +84,6 @@ export default function App() {
   const refreshHistory = () => {
     setHistory(getSummaries());
     setFolders(getFolders());
-  };
-
-  const queueStats = {
-    pending: queue.filter(q => q.status === 'pending').length,
-    running: queue.filter(q => q.status === 'running').length,
-    done: queue.filter(q => q.status === 'done').length,
-    error: queue.filter(q => q.status === 'error').length,
   };
 
   useEffect(() => {
@@ -151,20 +151,20 @@ export default function App() {
       const [urlPart, ...ctxParts] = line.split('|');
       const url = (urlPart ?? '').trim();
       const perVideoContext = ctxParts.join('|').trim();
-      const combinedContext = [baseOptions.extraContextText, perVideoContext].filter(Boolean).join('\n');
 
       return {
         id: crypto.randomUUID(),
         value: url,
-        submitMode: 'url',
+        submitMode: 'url' as const,
         model,
         options: {
           ...baseOptions,
-          extraContextText: combinedContext || undefined,
+          // In bulk mode, context is per-summary (use the per-line context only).
+          extraContextText: perVideoContext || undefined,
         },
         folderId: folderId || DEFAULT_FOLDER_ID,
-        status: 'pending',
-      };
+        status: 'pending' as const,
+      } as QueueItem;
     }).filter(i => !!i.value);
 
     if (items.length === 0) return;
@@ -175,23 +175,32 @@ export default function App() {
   };
 
   const handleSummarizeManyTranscripts = (
-    transcripts: string[],
+    transcripts: Array<{ transcript: string; contextText?: string }>,
     model: GeminiModel,
     baseOptions: SummaryOptions,
     folderId: string
   ) => {
-    const cleaned = transcripts.map(t => t.trim()).filter(Boolean);
+    const cleaned = transcripts
+      .map(t => ({
+        transcript: t.transcript.trim(),
+        contextText: (t.contextText ?? '').trim(),
+      }))
+      .filter(t => !!t.transcript);
     if (cleaned.length === 0) return;
 
-    const items: QueueItem[] = cleaned.map((transcriptChunk) => ({
+    const items: QueueItem[] = cleaned.map((t) => ({
       id: crypto.randomUUID(),
-      value: transcriptChunk,
-      submitMode: 'transcript',
+      value: t.transcript,
+      submitMode: 'transcript' as const,
       model,
-      options: baseOptions,
+      options: {
+        ...baseOptions,
+        // In bulk mode, context is per-summary (use the per-transcript context only).
+        extraContextText: t.contextText || undefined,
+      },
       folderId: folderId || DEFAULT_FOLDER_ID,
-      status: 'pending',
-    }));
+      status: 'pending' as const,
+    } as QueueItem));
 
     setError(null);
     setIsUnlistedError(false);

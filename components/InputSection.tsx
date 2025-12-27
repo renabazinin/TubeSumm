@@ -6,7 +6,7 @@ import { DEFAULT_FOLDER_ID, type HistoryFolder } from '../utils/storage';
 interface InputSectionProps {
   onSummarize: (value: string, mode: SummarizeMode, model: GeminiModel, options: SummaryOptions) => void;
   onSummarizeManyUrls: (bulkText: string, model: GeminiModel, options: SummaryOptions, folderId: string) => void;
-  onSummarizeManyTranscripts: (transcripts: string[], model: GeminiModel, options: SummaryOptions, folderId: string) => void;
+  onSummarizeManyTranscripts: (transcripts: Array<{ transcript: string; contextText?: string }>, model: GeminiModel, options: SummaryOptions, folderId: string) => void;
   isLoading: boolean;
   mode: SummarizeMode;
   setMode: (mode: SummarizeMode) => void;
@@ -22,7 +22,9 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
   const [bulkUrls, setBulkUrls] = useState('');
   const [isMultiUrl, setIsMultiUrl] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const [multiTranscripts, setMultiTranscripts] = useState<string[]>(['']);
+  const [multiTranscripts, setMultiTranscripts] = useState<Array<{ transcript: string; contextText: string }>>([
+    { transcript: '', contextText: '' }
+  ]);
   const [isMultiTranscript, setIsMultiTranscript] = useState(false);
   
   // Advanced Options
@@ -47,7 +49,9 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
     }
 
     if (mode === 'transcript' && isMultiTranscript) {
-      const cleaned = multiTranscripts.map(t => t.trim()).filter(Boolean);
+      const cleaned = multiTranscripts
+        .map(t => ({ transcript: t.transcript.trim(), contextText: t.contextText.trim() }))
+        .filter(t => !!t.transcript);
       if (cleaned.length === 0) return;
       onSummarizeManyTranscripts(cleaned, model, options, queueTargetFolderId || DEFAULT_FOLDER_ID);
       return;
@@ -89,7 +93,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
   const canSubmit = !isLoading && (
     mode === 'url'
       ? (isMultiUrl ? !!bulkUrls.trim() : !!url.trim())
-      : (isMultiTranscript ? multiTranscripts.some(t => !!t.trim()) : !!transcript.trim())
+      : (isMultiTranscript ? multiTranscripts.some(t => !!t.transcript.trim()) : !!transcript.trim())
   );
 
   const showQueueFolderSelect = (mode === 'url' && isMultiUrl) || (mode === 'transcript' && isMultiTranscript);
@@ -209,7 +213,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                           type="button"
                           onClick={() => {
                             if (multiTranscripts.length <= 1) {
-                              setMultiTranscripts(['']);
+                              setMultiTranscripts([{ transcript: '', contextText: '' }]);
                               return;
                             }
                             setMultiTranscripts(prev => prev.filter((_, i) => i !== idx));
@@ -223,13 +227,25 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                       </div>
                       <textarea
                         placeholder="Paste the transcript here..."
-                        value={t}
+                        value={t.transcript}
                         onChange={(e) => {
                           const next = e.target.value;
-                          setMultiTranscripts(prev => prev.map((p, i) => i === idx ? next : p));
+                          setMultiTranscripts(prev => prev.map((p, i) => i === idx ? { ...p, transcript: next } : p));
                         }}
                         rows={6}
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500 transition-all resize-none font-mono text-sm"
+                        disabled={isLoading}
+                      />
+
+                      <textarea
+                        placeholder="Context for this summary (optional)"
+                        value={t.contextText}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setMultiTranscripts(prev => prev.map((p, i) => i === idx ? { ...p, contextText: next } : p));
+                        }}
+                        rows={2}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500 transition-all resize-none text-sm"
                         disabled={isLoading}
                       />
                     </div>
@@ -238,7 +254,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                   <div className="flex items-center justify-between gap-3">
                     <button
                       type="button"
-                      onClick={() => setMultiTranscripts(prev => [...prev, ''])}
+                      onClick={() => setMultiTranscripts(prev => [...prev, { transcript: '', contextText: '' }])}
                       className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
                       disabled={isLoading}
                     >
