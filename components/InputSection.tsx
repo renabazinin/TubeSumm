@@ -4,15 +4,15 @@ import { SummarizeMode, GeminiModel, OutputLanguage, ExtraContextFile, SummaryOp
 import { DEFAULT_FOLDER_ID, type HistoryFolder } from '../utils/storage';
 
 interface InputSectionProps {
-  onSummarize: (value: string, mode: SummarizeMode, model: GeminiModel, options: SummaryOptions) => void;
+  onSummarize: (value: string, mode: SummarizeMode, model: GeminiModel, options: SummaryOptions, requestedTitle?: string) => void;
   onSummarizeManyUrls: (
-    items: Array<{ url: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
+    items: Array<{ url: string; requestedTitle?: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
     model: GeminiModel,
     options: SummaryOptions,
     folderId: string
   ) => void;
   onSummarizeManyTranscripts: (
-    transcripts: Array<{ transcript: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
+    transcripts: Array<{ transcript: string; requestedTitle?: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
     model: GeminiModel,
     options: SummaryOptions,
     folderId: string
@@ -28,14 +28,15 @@ interface InputSectionProps {
 
 export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSummarizeManyUrls, onSummarizeManyTranscripts, isLoading, mode, setMode, queueStats, folders, queueTargetFolderId, setQueueTargetFolderId }) => {
   const [model, setModel] = useState<GeminiModel>('gemini-3-flash-preview');
+  const [requestedTitle, setRequestedTitle] = useState('');
   const [url, setUrl] = useState('');
   const [isMultiUrl, setIsMultiUrl] = useState(false);
-  const [multiUrls, setMultiUrls] = useState<Array<{ url: string; contextText: string; extraContextFile?: ExtraContextFile; fileInputNonce: number }>>([
-    { url: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }
+  const [multiUrls, setMultiUrls] = useState<Array<{ url: string; requestedTitle: string; contextText: string; extraContextFile?: ExtraContextFile; fileInputNonce: number }>>([
+    { url: '', requestedTitle: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }
   ]);
   const [transcript, setTranscript] = useState('');
-  const [multiTranscripts, setMultiTranscripts] = useState<Array<{ transcript: string; contextText: string; extraContextFile?: ExtraContextFile; fileInputNonce: number }>>([
-    { transcript: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }
+  const [multiTranscripts, setMultiTranscripts] = useState<Array<{ transcript: string; requestedTitle: string; contextText: string; extraContextFile?: ExtraContextFile; fileInputNonce: number }>>([
+    { transcript: '', requestedTitle: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }
   ]);
   const [isMultiTranscript, setIsMultiTranscript] = useState(false);
   
@@ -78,6 +79,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
       const cleaned = multiUrls
         .map(i => ({
           url: i.url.trim(),
+          requestedTitle: i.requestedTitle.trim() || undefined,
           contextText: i.contextText.trim(),
           extraContextFile: i.extraContextFile,
         }))
@@ -91,6 +93,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
       const cleaned = multiTranscripts
         .map(t => ({
           transcript: t.transcript.trim(),
+          requestedTitle: t.requestedTitle.trim() || undefined,
           contextText: t.contextText.trim(),
           extraContextFile: t.extraContextFile,
         }))
@@ -102,7 +105,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
 
     const value = mode === 'url' ? url : transcript;
     if (!value.trim()) return;
-    onSummarize(value, mode, model, options);
+    onSummarize(value, mode, model, options, requestedTitle.trim() || undefined);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -188,17 +191,28 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
               </label>
 
               {!isMultiUrl ? (
-                <div className="relative">
+                <>
                   <input
                     type="text"
-                    placeholder="https://www.youtube.com/watch?v=..."
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 pl-11 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                    placeholder="Summary title (optional)"
+                    value={requestedTitle}
+                    onChange={(e) => setRequestedTitle(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
                     disabled={isLoading}
                   />
-                  <Youtube className="absolute left-3 top-3.5 w-5 h-5 text-slate-500" />
-                </div>
+
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 pl-11 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                      disabled={isLoading}
+                    />
+                    <Youtube className="absolute left-3 top-3.5 w-5 h-5 text-slate-500" />
+                  </div>
+                </>
               ) : (
                 <div className="space-y-3">
                   {multiUrls.map((item, idx) => {
@@ -225,6 +239,18 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                         </div>
 
                         <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Summary title (optional)"
+                            value={item.requestedTitle}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setMultiUrls(prev => prev.map((p, i) => i === idx ? { ...p, requestedTitle: next } : p));
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                            disabled={isLoading}
+                          />
+
                           <input
                             type="text"
                             placeholder="https://www.youtube.com/watch?v=..."
@@ -302,7 +328,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                   <div className="flex items-center justify-between gap-3">
                     <button
                       type="button"
-                      onClick={() => setMultiUrls(prev => [...prev, { url: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }])}
+                      onClick={() => setMultiUrls(prev => [...prev, { url: '', requestedTitle: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }])}
                       className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
                       disabled={isLoading}
                     >
@@ -331,6 +357,14 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
 
               {!isMultiTranscript ? (
                 <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Summary title (optional)"
+                    value={requestedTitle}
+                    onChange={(e) => setRequestedTitle(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500 transition-all text-sm mb-3"
+                    disabled={isLoading}
+                  />
                   <textarea
                     placeholder="Paste the video transcript here..."
                     value={transcript}
@@ -368,6 +402,18 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                           <X size={14} />
                         </button>
                       </div>
+                      <input
+                        type="text"
+                        placeholder="Summary title (optional)"
+                        value={t.requestedTitle}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setMultiTranscripts(prev => prev.map((p, i) => i === idx ? { ...p, requestedTitle: next } : p));
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500 transition-all text-sm"
+                        disabled={isLoading}
+                      />
+
                       <textarea
                         placeholder="Paste the transcript here..."
                         value={t.transcript}
@@ -443,7 +489,7 @@ export const InputSection: React.FC<InputSectionProps> = ({ onSummarize, onSumma
                   <div className="flex items-center justify-between gap-3">
                     <button
                       type="button"
-                      onClick={() => setMultiTranscripts(prev => [...prev, { transcript: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }])}
+                      onClick={() => setMultiTranscripts(prev => [...prev, { transcript: '', requestedTitle: '', contextText: '', extraContextFile: undefined, fileInputNonce: 0 }])}
                       className="flex items-center gap-2 px-3 py-2 bg-slate-950 border border-slate-700 hover:border-slate-500 rounded-lg text-sm text-slate-300 transition-colors"
                       disabled={isLoading}
                     >

@@ -95,9 +95,48 @@ export const SummaryDisplay: React.FC<SummaryDisplayProps> = ({ data }) => {
                   <h3 className="text-xl font-semibold text-slate-200 group-hover:text-white transition-colors">
                     {chapter.title}
                   </h3>
+
+                  {chapter.subSummary && (
+                    <div className="bg-slate-800/40 border border-slate-700/40 rounded-lg px-4 py-3">
+                      <div className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Sub summary</div>
+                      <div className="text-slate-300 leading-relaxed mt-1">
+                        {chapter.subSummary}
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-slate-400 leading-relaxed">
                     {chapter.summary}
                   </p>
+
+                  {chapter.subChapters && chapter.subChapters.length > 0 && (
+                    <div className="mt-4 space-y-3">
+                      <div className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Sub chapters</div>
+                      <div className="space-y-3">
+                        {chapter.subChapters.map((sc, scIdx) => (
+                          <div key={scIdx} className="bg-slate-950/40 border border-slate-800 rounded-lg p-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div className="text-sm font-semibold text-slate-200">
+                                {sc.subject}
+                              </div>
+                              <div className={
+                                `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium w-fit ` +
+                                (sc.timestamp
+                                  ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                                  : 'bg-slate-800 text-slate-500 border border-slate-700')
+                              }>
+                                <Clock className="w-3 h-3" />
+                                <span>{sc.timestamp || 'No Time'}</span>
+                              </div>
+                            </div>
+                            <div className="text-slate-400 leading-relaxed mt-2">
+                              {sc.summary}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

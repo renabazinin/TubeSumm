@@ -2,6 +2,16 @@ export interface Chapter {
   title: string;
   timestamp?: string; // Optional as manual transcripts might not have them
   summary: string;
+
+  // Nested breakdown (new)
+  subSummary?: string;
+  subChapters?: SubChapter[];
+}
+
+export interface SubChapter {
+  subject: string;
+  timestamp?: string;
+  summary: string;
 }
 
 export interface VideoSummary {

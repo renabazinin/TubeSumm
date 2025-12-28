@@ -28,6 +28,7 @@ type QueueStatus = 'pending' | 'running' | 'done' | 'error';
 type QueueItem = {
   id: string;
   value: string;
+  requestedTitle?: string;
   submitMode: SummarizeMode;
   model: GeminiModel;
   options: SummaryOptions;
@@ -101,10 +102,12 @@ export default function App() {
         try {
           let result;
           if (item.submitMode === 'url') {
-            result = await generateSummaryFromUrl(item.value, item.model, item.options, apiKey);
+            result = await generateSummaryFromUrl(item.value, item.model, item.options, apiKey, item.requestedTitle);
           } else {
-            result = await generateSummaryFromTranscript(item.value, item.model, item.options, apiKey);
+            result = await generateSummaryFromTranscript(item.value, item.model, item.options, apiKey, item.requestedTitle);
           }
+
+          const finalTitle = (item.requestedTitle ?? '').trim() || (result as any)?.title || 'Untitled Summary';
 
           const newSummary: VideoSummary = {
             id: crypto.randomUUID(),
@@ -115,7 +118,8 @@ export default function App() {
             outputLanguage: item.options.outputLanguage,
             hasExtraContext: !!(item.options.extraContextText || item.options.extraContextFile),
             folderId: item.folderId || DEFAULT_FOLDER_ID,
-            ...result
+            ...result,
+            title: finalTitle,
           };
 
           saveSummary(newSummary);
@@ -134,7 +138,7 @@ export default function App() {
   }, [queue, queueStats.running, apiKey]);
 
   const handleSummarizeManyUrls = (
-    items: Array<{ url: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
+    items: Array<{ url: string; requestedTitle?: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
     model: GeminiModel,
     baseOptions: SummaryOptions,
     folderId: string
@@ -142,6 +146,7 @@ export default function App() {
     const cleaned = items
       .map(i => ({
         url: i.url.trim(),
+        requestedTitle: (i.requestedTitle ?? '').trim() || undefined,
         contextText: (i.contextText ?? '').trim(),
         extraContextFile: i.extraContextFile,
       }))
@@ -152,6 +157,7 @@ export default function App() {
     const queueItems: QueueItem[] = cleaned.map((i) => ({
       id: crypto.randomUUID(),
       value: i.url,
+      requestedTitle: i.requestedTitle,
       submitMode: 'url' as const,
       model,
       options: {
@@ -172,7 +178,7 @@ export default function App() {
   };
 
   const handleSummarizeManyTranscripts = (
-    transcripts: Array<{ transcript: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
+    transcripts: Array<{ transcript: string; requestedTitle?: string; contextText?: string; extraContextFile?: ExtraContextFile }>,
     model: GeminiModel,
     baseOptions: SummaryOptions,
     folderId: string
@@ -180,6 +186,7 @@ export default function App() {
     const cleaned = transcripts
       .map(t => ({
         transcript: t.transcript.trim(),
+        requestedTitle: (t.requestedTitle ?? '').trim() || undefined,
         contextText: (t.contextText ?? '').trim(),
         extraContextFile: t.extraContextFile,
       }))
@@ -189,6 +196,7 @@ export default function App() {
     const items: QueueItem[] = cleaned.map((t) => ({
       id: crypto.randomUUID(),
       value: t.transcript,
+      requestedTitle: t.requestedTitle,
       submitMode: 'transcript' as const,
       model,
       options: {
@@ -210,7 +218,8 @@ export default function App() {
     value: string, 
     submitMode: SummarizeMode, 
     model: GeminiModel,
-    options: SummaryOptions
+    options: SummaryOptions,
+    requestedTitle?: string
   ) => {
     setIsLoading(true);
     setError(null);
@@ -220,10 +229,12 @@ export default function App() {
     try {
       let result;
       if (submitMode === 'url') {
-        result = await generateSummaryFromUrl(value, model, options, apiKey);
+        result = await generateSummaryFromUrl(value, model, options, apiKey, requestedTitle);
       } else {
-        result = await generateSummaryFromTranscript(value, model, options, apiKey);
+        result = await generateSummaryFromTranscript(value, model, options, apiKey, requestedTitle);
       }
+
+      const finalTitle = (requestedTitle ?? '').trim() || (result as any)?.title || 'Untitled Summary';
 
       const newSummary: VideoSummary = {
         id: crypto.randomUUID(),
@@ -233,7 +244,8 @@ export default function App() {
         model: model,
         outputLanguage: options.outputLanguage,
         hasExtraContext: !!(options.extraContextText || options.extraContextFile),
-        ...result
+        ...result,
+        title: finalTitle,
       };
 
       saveSummary(newSummary);

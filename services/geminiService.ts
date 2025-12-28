@@ -53,7 +53,21 @@ const summarySchema: Schema = {
         properties: {
           title: { type: Type.STRING, description: "Descriptive title of the chapter." },
           timestamp: { type: Type.STRING, description: "Start timestamp of the chapter (e.g., '02:15') if available or inferable." },
-          summary: { type: Type.STRING, description: "Detailed summary of the chapter's content." }
+          summary: { type: Type.STRING, description: "Detailed summary of the chapter's content." },
+          subSummary: { type: Type.STRING, description: "A short sub-summary of this chapter (1-3 sentences)." },
+          subChapters: {
+            type: Type.ARRAY,
+            description: "Sub-chapters inside this chapter, broken down by time steps and subjects.",
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                timestamp: { type: Type.STRING, description: "Timestamp for this sub-chapter (e.g., '07:42') if available or inferable." },
+                subject: { type: Type.STRING, description: "The subject/topic label for this sub-chapter." },
+                summary: { type: Type.STRING, description: "Detailed summary for this sub-chapter." }
+              },
+              required: ["subject", "summary"]
+            }
+          }
         },
         required: ["title", "summary"]
       }
@@ -62,7 +76,7 @@ const summarySchema: Schema = {
   required: ["title", "language", "overview", "chapters"]
 };
 
-const getCommonPromptInstructions = (options: SummaryOptions) => {
+const getCommonPromptInstructions = (options: SummaryOptions, requestedTitle?: string) => {
   const langInstruction = options.outputLanguage === 'auto' 
     ? "Determine the language of the video and output in that same language."
     : `Output strictly in ${options.outputLanguage === 'en' ? 'English' : 'Hebrew'}.`;
@@ -75,15 +89,21 @@ const getCommonPromptInstructions = (options: SummaryOptions) => {
     ? `\nNote: A supplementary file (PDF/Text) has been provided. Use its content to enrich the summary and clarify technical terms or context.\n`
     : "";
 
+  const titleInstruction = requestedTitle?.trim()
+    ? `\nUser-provided title (use this EXACTLY as the JSON title field, do not translate or rewrite): "${requestedTitle.trim()}"\n`
+    : "";
+
   return `
     ${contextInstruction}
     ${fileInstruction}
+    ${titleInstruction}
 
     1. ${langInstruction}
     2. Segment the video into logical chapters based on time progression. 
     3. **CRITICAL**: Create fewer, longer chapters containing detailed information. Do not omit important details. Each chapter summary must be comprehensive and very detailed.
     4. Extract or infer timestamps for when each chapter begins.
-    5. Provide a detailed overall summary of the video.
+    5. For EACH chapter, also provide a short \"subSummary\" and a list of \"subChapters\" (time steps + subjects) that further breaks the chapter down.
+    6. Provide a detailed overall summary of the video.
     
     Output strictly in JSON format matching the schema.
   `;
@@ -93,14 +113,15 @@ export const generateSummaryFromUrl = async (
   url: string, 
   model: GeminiModel,
   options: SummaryOptions,
-  apiKey?: string
+  apiKey?: string,
+  requestedTitle?: string
 ): Promise<Omit<VideoSummary, 'id' | 'createdAt' | 'sourceType' | 'sourceValue'>> => {
   const ai = getAIInstance(apiKey);
   
   const prompt = `
     You are an expert video content analyzer. 
     Analyze the provided YouTube video.
-    ${getCommonPromptInstructions(options)}
+    ${getCommonPromptInstructions(options, requestedTitle)}
   `;
 
   const parts: any[] = [
@@ -156,14 +177,15 @@ export const generateSummaryFromTranscript = async (
   transcript: string, 
   model: GeminiModel,
   options: SummaryOptions,
-  apiKey?: string
+  apiKey?: string,
+  requestedTitle?: string
 ): Promise<Omit<VideoSummary, 'id' | 'createdAt' | 'sourceType' | 'sourceValue'>> => {
   const ai = getAIInstance(apiKey);
 
   const prompt = `
     You are an expert video content analyzer.
     Analyze the following video transcript.
-    ${getCommonPromptInstructions(options)}
+    ${getCommonPromptInstructions(options, requestedTitle)}
 
     TRANSCRIPT:
     ${transcript.substring(0, 30000)} ... (truncated if too long)
